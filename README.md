@@ -98,10 +98,4 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
-## Licença
-
-MIT
-
----
-
 Desenvolvido por **Leonardo Carnauba**
