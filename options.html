@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Env Marker — Configurações</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Env Marker</h1>
+      <p class="subtitle">Marque ambientes com barra colorida para distinguir PRD, STG e DEV de relance.</p>
+    </header>
+
+    <div class="toolbar">
+      <label class="toggle">
+        <input type="checkbox" id="enabled" />
+        <span>Extensão ativa</span>
+      </label>
+      <button id="add-rule" class="btn-primary">+ Nova regra</button>
+    </div>
+
+    <details class="appearance" open>
+      <summary>Aparência da barra</summary>
+      <div class="appearance-grid">
+        <div class="field">
+          <label for="height">Altura: <span id="height-value">32</span>px</label>
+          <input type="range" id="height" min="20" max="80" step="1" value="32" />
+        </div>
+        <div class="field">
+          <label for="font-size">Tamanho da fonte: <span id="font-size-value">13</span>px</label>
+          <input type="range" id="font-size" min="10" max="32" step="1" value="13" />
+        </div>
+        <div class="field">
+          <label for="position">Posição</label>
+          <select id="position">
+            <option value="top">Topo</option>
+            <option value="bottom">Rodapé</option>
+          </select>
+        </div>
+        <div class="field field-preset">
+          <label>Atalhos</label>
+          <div class="preset-buttons">
+            <button type="button" data-preset="compact">Compacta</button>
+            <button type="button" data-preset="normal">Normal</button>
+            <button type="button" data-preset="big">Grande</button>
+            <button type="button" data-preset="huge">Gigante</button>
+          </div>
+        </div>
+      </div>
+      <div class="preview-wrapper">
+        <span class="preview-label">Pré-visualização:</span>
+        <div id="preview-bar">
+          <span class="preview-dot"></span>
+          <span>PRODUÇÃO</span>
+        </div>
+      </div>
+    </details>
+
+    <div class="info">
+      <strong>Padrões aceitos no campo "URL contém":</strong>
+      <ul>
+        <li><code>app.example.com</code> — match por substring (case-insensitive)</li>
+        <li><code>*.example.com/project/*</code> — wildcards com <code>*</code></li>
+        <li><code>/-prd\b|production/</code> — regex entre barras</li>
+      </ul>
+      <p>A primeira regra (de cima pra baixo) que casar com a URL vence. Ordene da mais específica pra mais genérica.</p>
+    </div>
+
+    <div id="rules"></div>
+
+    <template id="rule-template">
+      <div class="rule" draggable="true">
+        <div class="rule-handle" title="Arraste para reordenar">⋮⋮</div>
+        <div class="rule-fields">
+          <div class="field">
+            <label>Padrão (URL contém)</label>
+            <input type="text" class="rule-pattern" placeholder="ex: app.example.com" />
+          </div>
+          <div class="field">
+            <label>Label</label>
+            <input type="text" class="rule-label" placeholder="ex: PRODUÇÃO" maxlength="40" />
+          </div>
+          <div class="field field-color">
+            <label>Cor</label>
+            <input type="color" class="rule-color" value="#d13212" />
+            <select class="rule-preset">
+              <option value="">Presets…</option>
+              <option value="#d13212">🔴 Vermelho (PRD)</option>
+              <option value="#ff9900">🟠 Laranja (Staging)</option>
+              <option value="#f1c40f">🟡 Amarelo (STG)</option>
+              <option value="#1d8102">🟢 Verde (Dev)</option>
+              <option value="#3184c2">🔵 Azul (Local)</option>
+              <option value="#7d3cb5">🟣 Roxo (Test)</option>
+            </select>
+          </div>
+          <div class="field field-checks">
+            <label class="check">
+              <input type="checkbox" class="rule-enabled" checked />
+              Ativa
+            </label>
+            <label class="check">
+              <input type="checkbox" class="rule-prefix-title" />
+              Prefixar título da aba
+            </label>
+          </div>
+          <div class="field field-actions">
+            <button class="btn-test" title="Testar URL atual">Testar</button>
+            <button class="btn-remove" title="Remover regra">🗑</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <div class="footer">
+      <button id="save" class="btn-primary">Salvar alterações</button>
+      <button id="export">Exportar</button>
+      <button id="import">Importar</button>
+      <input type="file" id="import-file" accept="application/json" hidden />
+      <span id="status"></span>
+    </div>
+
+    <div class="credits">
+      <span>Env Marker v1.0 · criado por <strong>Leonardo Carnauba</strong></span>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

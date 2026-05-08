@@ -1,0 +1,91 @@
+/*!
+ * Env Marker — content styles
+ * Created by Leonardo Carnauba
+ */
+
+/* Container da barra de ambiente */
+#env-marker-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: var(--env-marker-height, 32px);
+  z-index: 2147483647; /* máximo z-index */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: var(--env-marker-font-size, 13px);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  pointer-events: none; /* não atrapalha cliques */
+  user-select: none;
+}
+
+/* Posição: topo (padrão) */
+#env-marker-bar.env-marker-top {
+  top: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Posição: rodapé */
+#env-marker-bar.env-marker-bottom {
+  bottom: 0;
+  box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#env-marker-bar .env-marker-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#env-marker-bar .env-marker-dot {
+  width: calc(var(--env-marker-font-size, 13px) * 0.62);
+  height: calc(var(--env-marker-font-size, 13px) * 0.62);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+}
+
+/* Empurra o conteúdo da página pra não ficar atrás da barra */
+html.env-marker-active.env-marker-pos-top {
+  margin-top: var(--env-marker-height, 32px) !important;
+}
+
+html.env-marker-active.env-marker-pos-bottom {
+  margin-bottom: var(--env-marker-height, 32px) !important;
+}
+
+/* Borda lateral opcional (sutil) */
+html.env-marker-active body {
+  position: relative;
+}
+
+html.env-marker-active body::before,
+html.env-marker-active body::after {
+  content: "";
+  position: fixed;
+  width: 3px;
+  z-index: 2147483646;
+  pointer-events: none;
+  background: var(--env-marker-color, transparent);
+  opacity: 0.6;
+}
+
+html.env-marker-active.env-marker-pos-top body::before,
+html.env-marker-active.env-marker-pos-top body::after {
+  top: var(--env-marker-height, 32px);
+  bottom: 0;
+}
+
+html.env-marker-active.env-marker-pos-bottom body::before,
+html.env-marker-active.env-marker-pos-bottom body::after {
+  top: 0;
+  bottom: var(--env-marker-height, 32px);
+}
+
+html.env-marker-active body::before { left: 0; }
+html.env-marker-active body::after { right: 0; }

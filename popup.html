@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      width: 280px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      color: #232f3e;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 14px;
+    }
+    .toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      background: #f5f7fa;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+    .current {
+      padding: 10px;
+      background: #eef4ff;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    .current .url { color: #5f6b7a; margin-top: 4px; }
+    .match {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      color: #fff;
+      font-weight: 600;
+      font-size: 11px;
+      margin-top: 6px;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #d0d6dd;
+      border-radius: 4px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover { background: #f5f7fa; }
+    .primary {
+      background: #ec7211;
+      color: #fff;
+      border-color: #ec7211;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .primary:hover { background: #d65f0a; }
+    .credits-popup {
+      text-align: center;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #e1e6eb;
+      font-size: 10px;
+      color: #aab2bd;
+      letter-spacing: 0.3px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Env Marker</h2>
+  <label class="toggle">
+    <span>Extensão ativa</span>
+    <input type="checkbox" id="enabled" />
+  </label>
+  <div class="current">
+    <strong>Aba atual:</strong>
+    <div class="url" id="url">—</div>
+    <div id="match-info"></div>
+  </div>
+  <button class="primary" id="open-options">Configurar regras</button>
+  <button id="quick-add">+ Adicionar regra para esta URL</button>
+  <div class="credits-popup">by Leonardo Carnauba</div>
+  <script src="popup.js"></script>
+</body>
+</html>
