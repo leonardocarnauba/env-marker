@@ -6,6 +6,27 @@
   "use strict";
 
   const BAR_ID = "env-marker-bar";
+  const _nudged = new Map(); // el -> original inline top value
+
+  function nudgeFixedElements(height) {
+    document.querySelectorAll("*").forEach(function (el) {
+      if (el.id === BAR_ID) return;
+      var cs = window.getComputedStyle(el);
+      if (cs.position !== "fixed" && cs.position !== "sticky") return;
+      var top = parseFloat(cs.top);
+      if (isNaN(top) || top < 0 || top >= height) return;
+      _nudged.set(el, el.style.top);
+      el.style.setProperty("top", (top + height) + "px", "important");
+    });
+  }
+
+  function clearNudge() {
+    _nudged.forEach(function (orig, el) {
+      if (orig === "") el.style.removeProperty("top");
+      else el.style.top = orig;
+    });
+    _nudged.clear();
+  }
 
   function matchesPattern(url, pattern) {
     if (!pattern) return false;
@@ -46,6 +67,7 @@
     document.documentElement.style.removeProperty("--env-marker-color");
     document.documentElement.style.removeProperty("--env-marker-height");
     document.documentElement.style.removeProperty("--env-marker-font-size");
+    clearNudge();
   }
 
   function renderBar(rule, appearance) {
@@ -80,6 +102,7 @@
       } else {
         document.documentElement.appendChild(bar);
       }
+      nudgeFixedElements(height);
     };
 
     if (document.readyState === "loading") {
