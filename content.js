@@ -7,20 +7,46 @@
 
   const BAR_ID = "env-marker-bar";
   const _nudged = new Map(); // el -> original inline top value
+  let _nudgeObserver = null;
+
+  function nudgeElement(el, height) {
+    if (el.id === BAR_ID) return;
+    if (_nudged.has(el)) return;
+    var cs = window.getComputedStyle(el);
+    if (cs.position !== "fixed" && cs.position !== "sticky") return;
+    var top = parseFloat(cs.top);
+    if (isNaN(top) || top < 0 || top >= height) return;
+    _nudged.set(el, el.style.top);
+    el.style.setProperty("top", (top + height) + "px", "important");
+  }
 
   function nudgeFixedElements(height) {
     document.querySelectorAll("*").forEach(function (el) {
-      if (el.id === BAR_ID) return;
-      var cs = window.getComputedStyle(el);
-      if (cs.position !== "fixed" && cs.position !== "sticky") return;
-      var top = parseFloat(cs.top);
-      if (isNaN(top) || top < 0 || top >= height) return;
-      _nudged.set(el, el.style.top);
-      el.style.setProperty("top", (top + height) + "px", "important");
+      nudgeElement(el, height);
     });
   }
 
+  function watchForNewFixed(height) {
+    if (_nudgeObserver) _nudgeObserver.disconnect();
+    _nudgeObserver = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          nudgeElement(node, height);
+          node.querySelectorAll("*").forEach(function (el) {
+            nudgeElement(el, height);
+          });
+        });
+      });
+    });
+    _nudgeObserver.observe(document.documentElement, { subtree: true, childList: true });
+  }
+
   function clearNudge() {
+    if (_nudgeObserver) {
+      _nudgeObserver.disconnect();
+      _nudgeObserver = null;
+    }
     _nudged.forEach(function (orig, el) {
       if (orig === "") el.style.removeProperty("top");
       else el.style.top = orig;
@@ -103,6 +129,7 @@
         document.documentElement.appendChild(bar);
       }
       nudgeFixedElements(height);
+      watchForNewFixed(height);
     };
 
     if (document.readyState === "loading") {
