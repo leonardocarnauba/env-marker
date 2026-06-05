@@ -8,36 +8,99 @@
   const BAR_ID = "env-marker-bar";
   const _nudged = new Map(); // el -> original inline top value
   let _nudgeObserver = null;
+  let _nudgeTimer = null;
+  let _urlObserver = null;
+
+  function hasExtensionContext() {
+    try {
+      return typeof chrome !== "undefined" && !!chrome.runtime?.id && !!chrome.storage?.sync;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function isContextInvalidatedError(error) {
+    return error?.message?.includes("Extension context invalidated");
+  }
+
+  function stopInvalidatedScript() {
+    removeBar();
+    if (_urlObserver) {
+      _urlObserver.disconnect();
+      _urlObserver = null;
+    }
+  }
+
+  function getTopFixedOwner(el, height) {
+    if (el.id === BAR_ID) return;
+    while (el && el !== document.body && el !== document.documentElement) {
+      let cs;
+      try {
+        cs = window.getComputedStyle(el);
+      } catch (e) {
+        return null;
+      }
+
+      if (cs.position === "fixed" || cs.position === "sticky") {
+        const rect = el.getBoundingClientRect();
+        const top = parseFloat(cs.top);
+        const intersectsMarker = rect.top < height && rect.bottom > 0;
+        if (intersectsMarker && !isNaN(top) && top >= 0 && top < height) {
+          return el;
+        }
+      }
+
+      el = el.parentElement;
+    }
+    return null;
+  }
 
   function nudgeElement(el, height) {
-    if (el.id === BAR_ID) return;
+    if (!el || el.id === BAR_ID) return;
     if (_nudged.has(el)) return;
-    var cs = window.getComputedStyle(el);
-    if (cs.position !== "fixed" && cs.position !== "sticky") return;
-    var top = parseFloat(cs.top);
-    if (isNaN(top) || top < 0 || top >= height) return;
+    let cs;
+    try {
+      cs = window.getComputedStyle(el);
+    } catch (e) {
+      return;
+    }
+    const top = parseFloat(cs.top);
+    if (isNaN(top)) return;
     _nudged.set(el, el.style.top);
     el.style.setProperty("top", (top + height) + "px", "important");
   }
 
   function nudgeFixedElements(height) {
-    document.querySelectorAll("*").forEach(function (el) {
-      nudgeElement(el, height);
+    const seen = new Set();
+    const y = Math.max(1, Math.min(height - 1, Math.round(height / 2)));
+    const sampleXs = [8, 80, Math.round(window.innerWidth / 2), window.innerWidth - 80, window.innerWidth - 8]
+      .filter(function (x) {
+        return x >= 0 && x < window.innerWidth;
+      });
+
+    sampleXs.forEach(function (x) {
+      document.elementsFromPoint(x, y).forEach(function (el) {
+        const owner = getTopFixedOwner(el, height);
+        if (owner && !seen.has(owner)) {
+          seen.add(owner);
+          nudgeElement(owner, height);
+        }
+      });
     });
+  }
+
+  function scheduleNudge(height) {
+    if (_nudgeTimer) window.clearTimeout(_nudgeTimer);
+    _nudgeTimer = window.setTimeout(function () {
+      _nudgeTimer = null;
+      nudgeFixedElements(height);
+    }, 50);
   }
 
   function watchForNewFixed(height) {
     if (_nudgeObserver) _nudgeObserver.disconnect();
-    _nudgeObserver = new MutationObserver(function (mutations) {
-      mutations.forEach(function (mutation) {
-        mutation.addedNodes.forEach(function (node) {
-          if (node.nodeType !== 1) return;
-          nudgeElement(node, height);
-          node.querySelectorAll("*").forEach(function (el) {
-            nudgeElement(el, height);
-          });
-        });
-      });
+    _nudgeObserver = new MutationObserver(function () {
+      scheduleNudge(height);
     });
     _nudgeObserver.observe(document.documentElement, { subtree: true, childList: true });
   }
@@ -46,6 +109,10 @@
     if (_nudgeObserver) {
       _nudgeObserver.disconnect();
       _nudgeObserver = null;
+    }
+    if (_nudgeTimer) {
+      window.clearTimeout(_nudgeTimer);
+      _nudgeTimer = null;
     }
     _nudged.forEach(function (orig, el) {
       if (orig === "") el.style.removeProperty("top");
@@ -164,40 +231,66 @@
   }
 
   function apply() {
-    chrome.storage.sync.get({
-      rules: [],
-      enabled: true,
-      appearance: { height: 32, fontSize: 13, position: "top" }
-    }, (data) => {
-      if (!data.enabled) {
-        removeBar();
+    if (!hasExtensionContext()) {
+      stopInvalidatedScript();
+      return;
+    }
+
+    try {
+      chrome.storage.sync.get({
+        rules: [],
+        enabled: true,
+        appearance: { height: 32, fontSize: 13, position: "top" }
+      }, (data) => {
+        if (!hasExtensionContext()) {
+          stopInvalidatedScript();
+          return;
+        }
+
+        if (!data.enabled) {
+          removeBar();
+          return;
+        }
+        const rule = findMatchingRule(location.href, data.rules);
+        if (rule) {
+          renderBar(rule, data.appearance);
+        } else {
+          removeBar();
+        }
+      });
+    } catch (error) {
+      if (isContextInvalidatedError(error)) {
+        stopInvalidatedScript();
         return;
       }
-      const rule = findMatchingRule(location.href, data.rules);
-      if (rule) {
-        renderBar(rule, data.appearance);
-      } else {
-        removeBar();
-      }
-    });
+      throw error;
+    }
   }
 
   // Aplica no carregamento
   apply();
 
   // Reage a mudanças de configuração
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "sync" && (changes.rules || changes.enabled || changes.appearance)) {
-      apply();
+  if (hasExtensionContext()) {
+    try {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === "sync" && (changes.rules || changes.enabled || changes.appearance)) {
+          apply();
+        }
+      });
+    } catch (error) {
+      if (!isContextInvalidatedError(error)) throw error;
+      stopInvalidatedScript();
     }
-  });
+  }
 
   // Reage a navegações SPA (mudança de URL sem reload)
   let lastUrl = location.href;
-  new MutationObserver(() => {
+  _urlObserver = new MutationObserver(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       apply();
     }
-  }).observe(document, { subtree: true, childList: true });
+  });
+  _urlObserver.observe(document, { subtree: true, childList: true });
 })();
