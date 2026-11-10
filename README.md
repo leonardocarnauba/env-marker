@@ -43,7 +43,7 @@ Por padrão o Chrome bloqueia extensões em modo anônimo. Para habilitar:
 |------|---------|---------------|
 | Substring | `app.example.com` | Match em qualquer parte da URL (case-insensitive) |
 | Wildcard | `*.example.com/project/*` | `*` substitui qualquer sequência de caracteres |
-| Regex | `/-prd\b\|production/` | Expressão regular JS entre barras |
+| Regex | `/-prd\b\|production/` | Expressão regular JS entre barras (sempre case-insensitive; flags no fim, como `/prd/i`, são aceitas) |
 
 A primeira regra que casar com a URL vence. Ordene da mais específica para a mais genérica usando o handle ⋮⋮ para arrastar.
 
@@ -51,7 +51,7 @@ A primeira regra que casar com a URL vence. Ordene da mais específica para a ma
 
 ## Regras padrão
 
-Incluídas no primeiro acesso como ponto de partida — ajuste para os domínios da sua organização:
+Gravadas automaticamente na instalação como ponto de partida — ajuste para os domínios da sua organização:
 
 | Padrão | Label | Cor |
 |--------|-------|-----|
@@ -65,7 +65,7 @@ Incluídas no primeiro acesso como ponto de partida — ajuste para os domínios
 ## Dicas de uso
 
 - Coloque regras de produção no topo da lista com padrões específicos (domínios exatos)
-- Use o botão **Testar** em cada regra para verificar o match contra a aba ativa
+- Use o botão **Testar** em cada regra para verificar o match (vem preenchido com a última aba que você usou)
 - Ative **Prefixar título** para produção: facilita identificar a aba ao alternar com `Cmd/Ctrl+Tab`
 - Para serviços com múltiplos projetos, crie regras por path: `dashboard.example.com/project/abc123`
 
@@ -76,12 +76,21 @@ Incluídas no primeiro acesso como ponto de partida — ajuste para os domínios
 ```
 env-marker/
 ├── manifest.json
+├── shared.js           # lógica de match, regras padrão e validação (usado por todos)
+├── background.js       # service worker — grava as regras padrão na instalação
 ├── content.js          # injeta a barra nas páginas
 ├── content.css         # estilos da barra
 ├── options.html/css/js # página de configuração
 ├── popup.html/js       # popup do ícone
+├── tests/              # testes da lógica de match (node --test)
 └── icons/
 ```
+
+### Permissões
+
+- `storage` — salvar e sincronizar as regras
+- `tabs` — ler a URL da aba atual no popup e no botão **Testar**
+- Content script em `<all_urls>` — necessário para desenhar a barra em qualquer site. A extensão não faz requisições de rede nem coleta dados.
 
 ---
 
@@ -89,6 +98,7 @@ env-marker/
 
 - Não funciona em páginas internas do Chrome (`chrome://`, `chrome-extension://`) — restrição da plataforma
 - Em sites com Content Security Policy restrita a barra pode não renderizar; a borda lateral ainda é aplicada nesses casos
+- A barra empurra a página com `margin` no `<html>`. Apps que ocupam exatamente `100vh` com `overflow: hidden` podem ficar com o rodapé cortado pela altura da barra
 
 ---
 
