@@ -2,17 +2,9 @@
  * Env Marker — options page
  * Created by Leonardo Carnauba
  */
+const M = globalThis.EnvMarker;
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
-
-const DEFAULT_RULES = [
-  { pattern: "/-prd\\b|\\bprod\\b|production/", label: "PRODUÇÃO", color: "#d13212", enabled: true, prefixTitle: true },
-  { pattern: "/-stg\\b|staging|-snb\\b|sandbox/", label: "STAGING", color: "#f1c40f", enabled: true, prefixTitle: false },
-  { pattern: "/-dev\\b|-hml\\b|homolog/", label: "DEV / HOMOLOG", color: "#3ecf8e", enabled: true, prefixTitle: false },
-  { pattern: "localhost", label: "LOCAL", color: "#3184c2", enabled: true, prefixTitle: false }
-];
-
-const DEFAULT_APPEARANCE = { height: 32, fontSize: 13, position: "top" };
 
 const PRESETS = {
   compact: { height: 22, fontSize: 11 },
@@ -22,20 +14,24 @@ const PRESETS = {
 };
 
 let rules = [];
-let enabled = true;
-let appearance = { ...DEFAULT_APPEARANCE };
+let appearance = { ...M.DEFAULT_APPEARANCE };
 
 async function load() {
   const data = await chrome.storage.sync.get({ rules: null, enabled: true, appearance: null });
-  rules = data.rules ?? DEFAULT_RULES;
-  enabled = data.enabled;
-  appearance = { ...DEFAULT_APPEARANCE, ...(data.appearance || {}) };
-  $("#enabled").checked = enabled;
+  rules = Array.isArray(data.rules)
+    ? data.rules.map(M.sanitizeRule).filter(Boolean)
+    : M.DEFAULT_RULES.map((r) => ({ ...r }));
+  appearance = M.sanitizeAppearance(data.appearance);
+  $("#enabled").checked = data.enabled;
+  syncAppearanceInputs();
+  render();
+}
+
+function syncAppearanceInputs() {
   $("#height").value = appearance.height;
   $("#font-size").value = appearance.fontSize;
   $("#position").value = appearance.position;
   updatePreview();
-  render();
 }
 
 function updatePreview() {
@@ -50,9 +46,19 @@ function updatePreview() {
   dot.style.height = dotSize + "px";
 }
 
+// Most recently used web tab — the options page itself is the active tab
+// here, so "active tab" would always be chrome-extension://...
+async function getLastWebTabUrl() {
+  const tabs = await chrome.tabs.query({});
+  const web = tabs
+    .filter((t) => /^(https?|file):/.test(t.url || ""))
+    .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+  return web[0]?.url || "";
+}
+
 function render() {
   const container = $("#rules");
-  container.innerHTML = "";
+  container.replaceChildren();
 
   if (rules.length === 0) {
     const empty = document.createElement("div");
@@ -66,6 +72,7 @@ function render() {
   rules.forEach((rule, idx) => {
     const node = tpl.content.cloneNode(true);
     const ruleEl = node.querySelector(".rule");
+    const handle = node.querySelector(".rule-handle");
     ruleEl.dataset.index = idx;
 
     const patternInput = node.querySelector(".rule-pattern");
@@ -77,7 +84,7 @@ function render() {
 
     patternInput.value = rule.pattern || "";
     labelInput.value = rule.label || "";
-    colorInput.value = rule.color || "#d13212";
+    colorInput.value = M.isValidColor(rule.color) ? rule.color : M.DEFAULT_COLOR;
     enabledCb.checked = rule.enabled !== false;
     prefixCb.checked = !!rule.prefixTitle;
 
@@ -102,20 +109,20 @@ function render() {
     });
 
     node.querySelector(".btn-test").addEventListener("click", async () => {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab) return;
-      const url = tab.url || "";
-      const matches = testPattern(url, rule.pattern);
-      alert(`URL da aba ativa:\n${url}\n\nResultado: ${matches ? "✅ CASA com este padrão" : "❌ não casa"}`);
+      const url = prompt("URL para testar este padrão:", await getLastWebTabUrl());
+      if (url == null) return;
+      const ok = M.matchesPattern(url, rules[idx].pattern);
+      alert(`URL:\n${url}\n\nResultado: ${ok ? "✅ CASA com este padrão" : "❌ não casa"}`);
     });
 
-    // Drag & drop
-    ruleEl.addEventListener("dragstart", (e) => {
+    // Drag & drop: só pelo handle, para não atrapalhar seleção de texto nos inputs
+    handle.addEventListener("dragstart", (e) => {
       ruleEl.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", String(idx));
+      e.dataTransfer.setDragImage(ruleEl, 20, 20);
     });
-    ruleEl.addEventListener("dragend", () => ruleEl.classList.remove("dragging"));
+    handle.addEventListener("dragend", () => ruleEl.classList.remove("dragging"));
     ruleEl.addEventListener("dragover", (e) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
@@ -123,31 +130,14 @@ function render() {
     ruleEl.addEventListener("drop", (e) => {
       e.preventDefault();
       const fromIdx = parseInt(e.dataTransfer.getData("text/plain"), 10);
-      const toIdx = idx;
-      if (fromIdx === toIdx) return;
+      if (!Number.isInteger(fromIdx) || fromIdx === idx) return;
       const [moved] = rules.splice(fromIdx, 1);
-      rules.splice(toIdx, 0, moved);
+      rules.splice(idx, 0, moved);
       render();
     });
 
     container.appendChild(node);
   });
-}
-
-function testPattern(url, pattern) {
-  if (!pattern) return false;
-  try {
-    if (pattern.startsWith("/") && pattern.endsWith("/") && pattern.length > 2) {
-      return new RegExp(pattern.slice(1, -1), "i").test(url);
-    }
-    if (pattern.includes("*")) {
-      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-      return new RegExp(escaped, "i").test(url);
-    }
-    return url.toLowerCase().includes(pattern.toLowerCase());
-  } catch {
-    return false;
-  }
 }
 
 function showStatus(msg, isError = false) {
@@ -159,13 +149,22 @@ function showStatus(msg, isError = false) {
 }
 
 $("#add-rule").addEventListener("click", () => {
-  rules.push({ pattern: "", label: "NOVO", color: "#3184c2", enabled: true, prefixTitle: false });
+  rules.push({ pattern: "", label: "NOVO", color: M.DEFAULT_COLOR, enabled: true, prefixTitle: false });
   render();
 });
 
-$("#enabled").addEventListener("change", (e) => { enabled = e.target.checked; });
+// Igual ao popup: liga/desliga na hora, sem precisar salvar
+$("#enabled").addEventListener("change", async (e) => {
+  await chrome.storage.sync.set({ enabled: e.target.checked });
+  showStatus(e.target.checked ? "✓ Extensão ativada" : "✓ Extensão desativada");
+});
 
-// Listeners de aparência (ao vivo, sem precisar salvar)
+// Mantém o checkbox em sincronia se o popup mudar o estado
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.enabled) $("#enabled").checked = changes.enabled.newValue !== false;
+});
+
+// Aparência: pré-visualização ao vivo; aplica nas páginas ao salvar
 $("#height").addEventListener("input", (e) => {
   appearance.height = parseInt(e.target.value, 10);
   updatePreview();
@@ -178,30 +177,29 @@ $("#position").addEventListener("change", (e) => {
   appearance.position = e.target.value;
 });
 
-// Atalhos de presets
-$$('.preset-buttons button').forEach(btn => {
+$$(".preset-buttons button").forEach((btn) => {
   btn.addEventListener("click", () => {
     const preset = PRESETS[btn.dataset.preset];
     if (preset) {
-      appearance.height = preset.height;
-      appearance.fontSize = preset.fontSize;
-      $("#height").value = preset.height;
-      $("#font-size").value = preset.fontSize;
-      updatePreview();
+      appearance = { ...appearance, ...preset };
+      syncAppearanceInputs();
     }
   });
 });
 
 $("#save").addEventListener("click", async () => {
-  const cleanRules = rules.filter(r => r.pattern && r.pattern.trim());
-  await chrome.storage.sync.set({ rules: cleanRules, enabled, appearance });
+  const cleanRules = rules
+    .map(M.sanitizeRule)
+    .filter((r) => r && r.pattern.trim());
+  appearance = M.sanitizeAppearance(appearance);
+  await chrome.storage.sync.set({ rules: cleanRules, appearance });
   rules = cleanRules;
   render();
   showStatus("✓ Salvo");
 });
 
 $("#export").addEventListener("click", () => {
-  const data = JSON.stringify({ rules, enabled, appearance }, null, 2);
+  const data = JSON.stringify({ rules, enabled: $("#enabled").checked, appearance }, null, 2);
   const blob = new Blob([data], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -216,33 +214,29 @@ $("#import-file").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    if (Array.isArray(data.rules)) {
-      rules = data.rules.map(r => ({
-        ...r,
-        color: /^#[0-9a-fA-F]{3,8}$/.test(r.color) ? r.color : "#3184c2"
-      }));
-      if (typeof data.enabled === "boolean") {
-        enabled = data.enabled;
-        $("#enabled").checked = enabled;
-      }
-      if (data.appearance) {
-        appearance = { ...DEFAULT_APPEARANCE, ...data.appearance };
-        $("#height").value = appearance.height;
-        $("#font-size").value = appearance.fontSize;
-        $("#position").value = appearance.position;
-        updatePreview();
-      }
-      render();
-      showStatus("✓ Importado (lembre de salvar)");
-    } else {
+    const data = JSON.parse(await file.text());
+    if (!data || !Array.isArray(data.rules)) {
       showStatus("Arquivo inválido", true);
+      return;
     }
+    const imported = data.rules.map(M.sanitizeRule).filter(Boolean);
+    const skipped = data.rules.length - imported.length;
+    rules = imported;
+    if (data.appearance) {
+      appearance = M.sanitizeAppearance(data.appearance);
+      syncAppearanceInputs();
+    }
+    if (typeof data.enabled === "boolean") {
+      $("#enabled").checked = data.enabled;
+      await chrome.storage.sync.set({ enabled: data.enabled });
+    }
+    render();
+    showStatus(`✓ Importado${skipped ? ` (${skipped} regra(s) inválida(s) ignorada(s))` : ""} — lembre de salvar`);
   } catch (err) {
     showStatus("Erro ao importar: " + err.message, true);
+  } finally {
+    e.target.value = "";
   }
-  e.target.value = "";
 });
 
 load();
