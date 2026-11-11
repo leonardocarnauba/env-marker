@@ -59,11 +59,8 @@ html.env-marker-active.env-marker-pos-bottom {
   margin-bottom: var(--env-marker-height, 32px) !important;
 }
 
-/* Borda lateral opcional (sutil) */
-html.env-marker-active body {
-  position: relative;
-}
-
+/* Borda lateral sutil. São position: fixed, então não dependem do body ser
+   "relative" — forçar isso quebrava elementos absolute filhos do body. */
 html.env-marker-active body::before,
 html.env-marker-active body::after {
   content: "";
