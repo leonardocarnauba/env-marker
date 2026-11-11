@@ -5,11 +5,16 @@
 (function () {
   "use strict";
 
+  const M = globalThis.EnvMarker;
   const BAR_ID = "env-marker-bar";
-  const _nudged = new Map(); // el -> original inline top value
-  let _nudgeObserver = null;
+  const FALLBACK_COLOR = "#d13212";
+
+  let _active = null;          // { side, height, key, bar } while the bar is shown
+  const _nudged = new Map();   // el -> { side, orig, prio } (original inline style)
   let _nudgeTimer = null;
-  let _urlObserver = null;
+  let _titlePrefix = null;
+  let _domObserver = null;
+  let _lastUrl = location.href;
 
   function hasExtensionContext() {
     try {
@@ -23,274 +28,266 @@
     return error?.message?.includes("Extension context invalidated");
   }
 
-  function stopInvalidatedScript() {
-    removeBar();
-    if (_urlObserver) {
-      _urlObserver.disconnect();
-      _urlObserver = null;
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Fixed/sticky elements overlapping the bar get pushed out of the way
+  // (down when the bar is on top, up when it is at the bottom).
+  // ---------------------------------------------------------------------------
 
-  function getTopFixedOwner(el, height) {
-    if (el.id === BAR_ID) return;
+  function findOverlappingOwner(el, side, height) {
+    const vh = window.innerHeight;
     while (el && el !== document.body && el !== document.documentElement) {
+      if (el.id === BAR_ID) return null;
       let cs;
       try {
         cs = window.getComputedStyle(el);
       } catch (e) {
         return null;
       }
-
       if (cs.position === "fixed" || cs.position === "sticky") {
-        const rect = el.getBoundingClientRect();
-        const top = parseFloat(cs.top);
-        const intersectsMarker = rect.top < height && rect.bottom > 0;
-        if (intersectsMarker && !isNaN(top) && top >= 0 && top < height) {
-          return el;
-        }
+        const offset = parseFloat(cs[side]);
+        const r = el.getBoundingClientRect();
+        const overlaps = side === "top"
+          ? r.top < height && r.bottom > 0
+          : r.bottom > vh - height && r.top < vh;
+        if (overlaps && !isNaN(offset) && offset >= 0 && offset < height) return el;
       }
-
       el = el.parentElement;
     }
     return null;
   }
 
-  function nudgeElement(el, height) {
-    if (!el || el.id === BAR_ID) return;
+  function nudgeElement(el, side, height) {
     if (_nudged.has(el)) return;
-    let cs;
+    let offset;
     try {
-      cs = window.getComputedStyle(el);
+      offset = parseFloat(window.getComputedStyle(el)[side]);
     } catch (e) {
       return;
     }
-    const top = parseFloat(cs.top);
-    if (isNaN(top)) return;
-    _nudged.set(el, el.style.top);
-    el.style.setProperty("top", (top + height) + "px", "important");
+    if (isNaN(offset)) return;
+    _nudged.set(el, {
+      side,
+      orig: el.style.getPropertyValue(side),
+      prio: el.style.getPropertyPriority(side)
+    });
+    el.style.setProperty(side, (offset + height) + "px", "important");
   }
 
-  function nudgeFixedElements(height) {
+  function nudgeFixedElements() {
+    if (!_active) return;
+    const { side, height } = _active;
+    const w = window.innerWidth;
+    const half = Math.max(1, Math.min(height - 1, Math.round(height / 2)));
+    const y = side === "top" ? half : window.innerHeight - half;
+    const xs = [8, 80, Math.round(w / 2), w - 80, w - 8].filter((x) => x >= 0 && x < w);
     const seen = new Set();
-    const y = Math.max(1, Math.min(height - 1, Math.round(height / 2)));
-    const sampleXs = [8, 80, Math.round(window.innerWidth / 2), window.innerWidth - 80, window.innerWidth - 8]
-      .filter(function (x) {
-        return x >= 0 && x < window.innerWidth;
-      });
 
-    sampleXs.forEach(function (x) {
-      document.elementsFromPoint(x, y).forEach(function (el) {
-        const owner = getTopFixedOwner(el, height);
+    for (const x of xs) {
+      for (const el of document.elementsFromPoint(x, y)) {
+        const owner = findOverlappingOwner(el, side, height);
         if (owner && !seen.has(owner)) {
           seen.add(owner);
-          nudgeElement(owner, height);
+          nudgeElement(owner, side, height);
         }
-      });
-    });
+      }
+    }
   }
 
-  function scheduleNudge(height) {
-    if (_nudgeTimer) window.clearTimeout(_nudgeTimer);
-    _nudgeTimer = window.setTimeout(function () {
+  // Throttled (not debounced): pages that mutate the DOM constantly would
+  // otherwise postpone the nudge forever.
+  function scheduleNudge() {
+    if (_nudgeTimer || !_active) return;
+    _nudgeTimer = window.setTimeout(() => {
       _nudgeTimer = null;
-      nudgeFixedElements(height);
+      nudgeFixedElements();
     }, 50);
   }
 
-  function watchForNewFixed(height) {
-    if (_nudgeObserver) _nudgeObserver.disconnect();
-    _nudgeObserver = new MutationObserver(function () {
-      scheduleNudge(height);
-    });
-    _nudgeObserver.observe(document.documentElement, { subtree: true, childList: true });
-  }
-
   function clearNudge() {
-    if (_nudgeObserver) {
-      _nudgeObserver.disconnect();
-      _nudgeObserver = null;
-    }
     if (_nudgeTimer) {
       window.clearTimeout(_nudgeTimer);
       _nudgeTimer = null;
     }
-    _nudged.forEach(function (orig, el) {
-      if (orig === "") el.style.removeProperty("top");
-      else el.style.top = orig;
+    _nudged.forEach(({ side, orig, prio }, el) => {
+      if (orig === "") el.style.removeProperty(side);
+      else el.style.setProperty(side, orig, prio);
     });
     _nudged.clear();
   }
 
-  function matchesPattern(url, pattern) {
-    if (!pattern) return false;
-    // Suporta wildcard simples (*) e match por substring
-    try {
-      // Se tem regex válido entre / /, usa como regex
-      if (pattern.startsWith("/") && pattern.endsWith("/") && pattern.length > 2) {
-        const re = new RegExp(pattern.slice(1, -1), "i");
-        return re.test(url);
-      }
-      // Wildcard: converte * em .*
-      if (pattern.includes("*")) {
-        const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-        const re = new RegExp(escaped, "i");
-        return re.test(url);
-      }
-      // Substring match (case-insensitive)
-      return url.toLowerCase().includes(pattern.toLowerCase());
-    } catch (e) {
-      return false;
+  // ---------------------------------------------------------------------------
+  // Tab title prefix
+  // ---------------------------------------------------------------------------
+
+  function ensureTitlePrefix() {
+    if (_titlePrefix && !document.title.startsWith(_titlePrefix)) {
+      document.title = _titlePrefix + document.title;
     }
   }
 
-  function findMatchingRule(url, rules) {
-    if (!Array.isArray(rules)) return null;
-    // Primeira regra que casar vence (ordem importa)
-    for (const rule of rules) {
-      if (rule.enabled === false) continue;
-      if (matchesPattern(url, rule.pattern)) return rule;
+  function setTitlePrefix(prefix) {
+    if (prefix === _titlePrefix) {
+      ensureTitlePrefix();
+      return;
     }
-    return null;
+    const old = _titlePrefix;
+    _titlePrefix = null;
+    if (old && document.title.startsWith(old)) {
+      document.title = document.title.slice(old.length);
+    }
+    _titlePrefix = prefix || null;
+    // If <title> doesn't exist yet (document_start), the DOM observer
+    // applies the prefix as soon as the page sets it.
+    ensureTitlePrefix();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bar
+  // ---------------------------------------------------------------------------
+
+  function mountBar() {
+    if (!_active || _active.bar.isConnected) return;
+    (document.body || document.documentElement).appendChild(_active.bar);
   }
 
   function removeBar() {
-    const existing = document.getElementById(BAR_ID);
-    if (existing) existing.remove();
-    document.documentElement.classList.remove("env-marker-active", "env-marker-pos-top", "env-marker-pos-bottom");
-    document.documentElement.style.removeProperty("--env-marker-color");
-    document.documentElement.style.removeProperty("--env-marker-height");
-    document.documentElement.style.removeProperty("--env-marker-font-size");
+    document.getElementById(BAR_ID)?.remove();
+    const root = document.documentElement;
+    root.classList.remove("env-marker-active", "env-marker-pos-top", "env-marker-pos-bottom");
+    root.style.removeProperty("--env-marker-color");
+    root.style.removeProperty("--env-marker-height");
+    root.style.removeProperty("--env-marker-font-size");
     clearNudge();
+    _active = null;
   }
 
   function renderBar(rule, appearance) {
-    removeBar();
+    const { height, fontSize, position } = M.sanitizeAppearance(appearance);
+    const color = typeof rule.color === "string" && CSS.supports("color", rule.color)
+      ? rule.color
+      : FALLBACK_COLOR;
+    const labelText = rule.label || "AMBIENTE";
+    const key = JSON.stringify([labelText, color, height, fontSize, position]);
 
-    const height = appearance?.height ?? 32;
-    const fontSize = appearance?.fontSize ?? 13;
-    const position = appearance?.position === "bottom" ? "bottom" : "top";
+    // Same bar already showing (e.g. SPA navigation inside the same env).
+    if (_active && _active.key === key) {
+      mountBar();
+      scheduleNudge();
+      return;
+    }
+
+    removeBar();
 
     const bar = document.createElement("div");
     bar.id = BAR_ID;
     bar.className = position === "bottom" ? "env-marker-bottom" : "env-marker-top";
-    bar.style.background = rule.color || "#d13212";
+    bar.style.background = color;
 
     const label = document.createElement("div");
     label.className = "env-marker-label";
-
     const dot = document.createElement("span");
     dot.className = "env-marker-dot";
-
     const text = document.createElement("span");
-    text.textContent = rule.label || "AMBIENTE";
-
-    label.appendChild(dot);
-    label.appendChild(text);
+    text.textContent = labelText;
+    label.append(dot, text);
     bar.appendChild(label);
 
-    // Insere no documentElement (funciona mesmo antes do <body>)
-    const insert = () => {
-      if (document.body) {
-        document.body.appendChild(bar);
-      } else {
-        document.documentElement.appendChild(bar);
-      }
-      nudgeFixedElements(height);
-      watchForNewFixed(height);
-    };
+    _active = { side: position, height, key, bar };
+    mountBar();
+
+    const root = document.documentElement;
+    root.classList.add("env-marker-active", position === "bottom" ? "env-marker-pos-bottom" : "env-marker-pos-top");
+    root.style.setProperty("--env-marker-color", color);
+    root.style.setProperty("--env-marker-height", height + "px");
+    root.style.setProperty("--env-marker-font-size", fontSize + "px");
 
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", insert, { once: true });
+      document.addEventListener("DOMContentLoaded", scheduleNudge, { once: true });
     } else {
-      insert();
+      scheduleNudge();
     }
+  }
 
-    document.documentElement.classList.add("env-marker-active");
-    document.documentElement.classList.add(position === "bottom" ? "env-marker-pos-bottom" : "env-marker-pos-top");
-    document.documentElement.style.setProperty("--env-marker-color", rule.color || "#d13212");
-    document.documentElement.style.setProperty("--env-marker-height", height + "px");
-    document.documentElement.style.setProperty("--env-marker-font-size", fontSize + "px");
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
 
-    // Atualiza título da aba se configurado
-    if (rule.prefixTitle) {
-      const prefix = `[${rule.label}] `;
-      if (!document.title.startsWith(prefix)) {
-        const original = document.title;
-        document.title = prefix + original;
-        // Observa mudanças de título para manter o prefixo
-        const titleEl = document.querySelector("title");
-        if (titleEl) {
-          new MutationObserver(() => {
-            if (!document.title.startsWith(prefix)) {
-              document.title = prefix + document.title;
-            }
-          }).observe(titleEl, { childList: true });
-        }
-      }
+  function shutdown() {
+    removeBar();
+    setTitlePrefix(null);
+    if (_domObserver) {
+      _domObserver.disconnect();
+      _domObserver = null;
     }
+    window.removeEventListener("popstate", checkUrl);
+    window.removeEventListener("hashchange", checkUrl);
+    window.removeEventListener("scroll", scheduleNudge);
+    window.removeEventListener("resize", scheduleNudge);
   }
 
   function apply() {
     if (!hasExtensionContext()) {
-      stopInvalidatedScript();
+      shutdown();
       return;
     }
-
     try {
-      chrome.storage.sync.get({
-        rules: [],
-        enabled: true,
-        appearance: { height: 32, fontSize: 13, position: "top" }
-      }, (data) => {
+      chrome.storage.sync.get({ rules: [], enabled: true, appearance: M.DEFAULT_APPEARANCE }, (data) => {
         if (!hasExtensionContext()) {
-          stopInvalidatedScript();
+          shutdown();
           return;
         }
-
-        if (!data.enabled) {
-          removeBar();
-          return;
-        }
-        const rule = findMatchingRule(location.href, data.rules);
+        const rule = data.enabled ? M.findMatchingRule(location.href, data.rules) : null;
         if (rule) {
           renderBar(rule, data.appearance);
+          setTitlePrefix(rule.prefixTitle ? `[${rule.label || "AMBIENTE"}] ` : null);
         } else {
           removeBar();
+          setTitlePrefix(null);
         }
       });
     } catch (error) {
       if (isContextInvalidatedError(error)) {
-        stopInvalidatedScript();
+        shutdown();
         return;
       }
       throw error;
     }
   }
 
-  // Aplica no carregamento
-  apply();
-
-  // Reage a mudanças de configuração
-  if (hasExtensionContext()) {
-    try {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === "sync" && (changes.rules || changes.enabled || changes.appearance)) {
-          apply();
-        }
-      });
-    } catch (error) {
-      if (!isContextInvalidatedError(error)) throw error;
-      stopInvalidatedScript();
+  function checkUrl() {
+    if (location.href !== _lastUrl) {
+      _lastUrl = location.href;
+      apply();
     }
   }
 
-  // Reage a navegações SPA (mudança de URL sem reload)
-  let lastUrl = location.href;
-  _urlObserver = new MutationObserver(() => {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      apply();
+  // One observer for everything: SPA navigation, title prefix, bar removed by
+  // the page, and new fixed elements that need nudging.
+  _domObserver = new MutationObserver(() => {
+    checkUrl();
+    ensureTitlePrefix();
+    if (_active) {
+      mountBar();
+      scheduleNudge();
     }
   });
-  _urlObserver.observe(document, { subtree: true, childList: true });
+  _domObserver.observe(document, { subtree: true, childList: true });
+  window.addEventListener("popstate", checkUrl);
+  window.addEventListener("hashchange", checkUrl);
+  // Sticky headers only reach the bar after scrolling, and "show on scroll up"
+  // headers often appear via class changes (no childList mutation).
+  window.addEventListener("scroll", scheduleNudge, { passive: true });
+  window.addEventListener("resize", scheduleNudge, { passive: true });
+
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "sync" && (changes.rules || changes.enabled || changes.appearance)) {
+        apply();
+      }
+    });
+  } catch (error) {
+    if (!isContextInvalidatedError(error)) throw error;
+  }
+
+  apply();
 })();

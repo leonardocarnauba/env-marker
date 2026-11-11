@@ -1,35 +1,35 @@
-function testPattern(url, pattern) {
-  if (!pattern) return false;
-  try {
-    if (pattern.startsWith("/") && pattern.endsWith("/") && pattern.length > 2) {
-      return new RegExp(pattern.slice(1, -1), "i").test(url);
-    }
-    if (pattern.includes("*")) {
-      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-      return new RegExp(escaped, "i").test(url);
-    }
-    return url.toLowerCase().includes(pattern.toLowerCase());
-  } catch {
-    return false;
-  }
+/*!
+ * Env Marker — popup
+ * Created by Leonardo Carnauba
+ */
+const M = globalThis.EnvMarker;
+
+async function getRules() {
+  const { rules } = await chrome.storage.sync.get({ rules: null });
+  return Array.isArray(rules) ? rules : M.DEFAULT_RULES.map((r) => ({ ...r }));
 }
 
 async function init() {
-  const data = await chrome.storage.sync.get({ rules: [], enabled: true });
-  document.getElementById("enabled").checked = data.enabled;
+  const { enabled } = await chrome.storage.sync.get({ enabled: true });
+  document.getElementById("enabled").checked = enabled;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || "";
-  document.getElementById("url").textContent = url;
+  document.getElementById("url").textContent = url || "—";
 
-  // Encontra match
-  const matched = data.rules.find(r => r.enabled !== false && testPattern(url, r.pattern));
+  const matched = M.findMatchingRule(url, await getRules());
   const info = document.getElementById("match-info");
+  info.replaceChildren();
+  const badge = document.createElement("span");
   if (matched) {
-    info.innerHTML = `<span class="match" style="background:${matched.color}">${matched.label}</span>`;
+    badge.className = "match";
+    badge.style.background = M.isValidColor(matched.color) ? matched.color : M.DEFAULT_COLOR;
+    badge.textContent = matched.label || "AMBIENTE";
   } else {
-    info.innerHTML = `<span style="color:#8b96a3;font-size:11px;">Nenhuma regra casa com esta URL</span>`;
+    badge.className = "no-match";
+    badge.textContent = "Nenhuma regra casa com esta URL";
   }
+  info.appendChild(badge);
 }
 
 document.getElementById("enabled").addEventListener("change", async (e) => {
@@ -42,22 +42,20 @@ document.getElementById("open-options").addEventListener("click", () => {
 
 document.getElementById("quick-add").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url) return;
+  let hostname;
   try {
-    const u = new URL(tab.url);
-    const data = await chrome.storage.sync.get({ rules: [] });
-    data.rules.push({
-      pattern: u.hostname,
-      label: "NOVO",
-      color: "#3184c2",
-      enabled: true,
-      prefixTitle: false
-    });
-    await chrome.storage.sync.set({ rules: data.rules });
-    chrome.runtime.openOptionsPage();
+    hostname = new URL(tab?.url || "").hostname;
   } catch (e) {
-    alert("URL inválida");
+    hostname = "";
   }
+  if (!hostname) {
+    alert("Esta aba não tem uma URL que possa virar regra.");
+    return;
+  }
+  const rules = await getRules();
+  rules.push({ pattern: hostname, label: "NOVO", color: M.DEFAULT_COLOR, enabled: true, prefixTitle: false });
+  await chrome.storage.sync.set({ rules });
+  chrome.runtime.openOptionsPage();
 });
 
 init();

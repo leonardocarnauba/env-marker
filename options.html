@@ -62,7 +62,7 @@
       <ul>
         <li><code>app.example.com</code> — match por substring (case-insensitive)</li>
         <li><code>*.example.com/project/*</code> — wildcards com <code>*</code></li>
-        <li><code>/-prd\b|production/</code> — regex entre barras</li>
+        <li><code>/-prd\b|production/</code> — regex entre barras (sempre case-insensitive; flags no fim como <code>/prd/i</code> também são aceitas)</li>
       </ul>
       <p>A primeira regra (de cima pra baixo) que casar com a URL vence. Ordene da mais específica pra mais genérica.</p>
     </div>
@@ -70,8 +70,8 @@
     <div id="rules"></div>
 
     <template id="rule-template">
-      <div class="rule" draggable="true">
-        <div class="rule-handle" title="Arraste para reordenar">⋮⋮</div>
+      <div class="rule">
+        <div class="rule-handle" draggable="true" title="Arraste para reordenar">⋮⋮</div>
         <div class="rule-fields">
           <div class="field">
             <label>Padrão (URL contém)</label>
@@ -105,7 +105,7 @@
             </label>
           </div>
           <div class="field field-actions">
-            <button class="btn-test" title="Testar URL atual">Testar</button>
+            <button class="btn-test" title="Testar o padrão contra uma URL">Testar</button>
             <button class="btn-remove" title="Remover regra">🗑</button>
           </div>
         </div>
@@ -121,10 +121,11 @@
     </div>
 
     <div class="credits">
-      <span>Env Marker v1.0 · criado por <strong>Leonardo Carnauba</strong></span>
+      <span>Env Marker v1.1 · criado por <strong>Leonardo Carnauba</strong></span>
     </div>
   </div>
 
+  <script src="shared.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
