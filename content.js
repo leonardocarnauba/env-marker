@@ -221,6 +221,8 @@
     }
     window.removeEventListener("popstate", checkUrl);
     window.removeEventListener("hashchange", checkUrl);
+    window.removeEventListener("scroll", scheduleNudge);
+    window.removeEventListener("resize", scheduleNudge);
   }
 
   function apply() {
@@ -272,6 +274,10 @@
   _domObserver.observe(document, { subtree: true, childList: true });
   window.addEventListener("popstate", checkUrl);
   window.addEventListener("hashchange", checkUrl);
+  // Sticky headers only reach the bar after scrolling, and "show on scroll up"
+  // headers often appear via class changes (no childList mutation).
+  window.addEventListener("scroll", scheduleNudge, { passive: true });
+  window.addEventListener("resize", scheduleNudge, { passive: true });
 
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
